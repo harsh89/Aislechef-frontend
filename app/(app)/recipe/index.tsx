@@ -16,9 +16,10 @@ import { Text } from '../../../components/ui/Text';
 import { Separator } from '../../../components/ui/Separator';
 import { RecipeCard } from '../../../components/features/recipe/RecipeCard';
 import { IngredientDiff } from '../../../components/features/recipe/IngredientDiff';
-import { CUISINES } from '../../../types';
+import { CUISINES, RECIPE_MODES } from '../../../types';
 import type {
   CuisineFilter,
+  RecipeMode,
   GroceryItem,
   ReccoResponse,
   RecipeIngredient,
@@ -34,8 +35,9 @@ export default function RecipeScreen() {
   }>();
   const selectedItemIds: string[] = rawIds ? JSON.parse(rawIds) : [];
 
-  const { colors, spacing, radius, shadow } = useTheme();
+  const { colors, spacing, radius } = useTheme();
   const [cuisine, setCuisine] = useState<CuisineFilter | null>(null);
+  const [recipeMode, setRecipeMode] = useState<RecipeMode>('exact');
   const [addingIds, setAddingIds] = useState<Set<string>>(new Set());
 
   // Load all local items for ingredient diff
@@ -51,12 +53,12 @@ export default function RecipeScreen() {
 
   // Recco mutation
   const reccoMutation = useMutation({
-    mutationFn: (cuisineFilter: CuisineFilter) =>
-      api.post<ReccoResponse>('/recco', {
-        listId,
-        cuisineFilter,
-        selectedItemIds,
-      }),
+    mutationFn: (cuisineFilter: CuisineFilter) => {
+      const selectedItems = localItems
+        .filter((item) => selectedItemIds.includes(item.itemId))
+        .map((item) => item.itemName);
+      return api.post<ReccoResponse>('/recco', { cuisineFilter, selectedItems, recipeMode });
+    },
     onError: (err) => {
       if (err instanceof ApiError && err.status === 429) {
         Alert.alert('Rate limit', "You've reached today's limit (10 requests).");
@@ -98,6 +100,49 @@ export default function RecipeScreen() {
       <Stack.Screen options={{ title: 'Create Recipe', headerShown: true }} />
 
       <ScrollView contentContainerStyle={{ paddingBottom: spacing[8] }} keyboardShouldPersistTaps="handled">
+        {/* Mode toggle */}
+        <View style={{ padding: spacing[4], paddingBottom: 0 }}>
+          <Text variant="bodyMd" style={{ marginBottom: spacing[3] }}>Recipe mode</Text>
+          <View style={{ flexDirection: 'row', gap: spacing[2] }}>
+            {RECIPE_MODES.map((m) => {
+              const isSelected = recipeMode === m.value;
+              return (
+                <Pressable
+                  key={m.value}
+                  onPress={() => setRecipeMode(m.value)}
+                  style={({ pressed }) => ({
+                    flex: 1,
+                    paddingVertical: spacing[3],
+                    paddingHorizontal: spacing[3],
+                    borderRadius: radius.md,
+                    borderWidth: 1,
+                    borderColor: isSelected ? colors.primary : colors.border,
+                    backgroundColor: isSelected ? colors.primary : colors.secondary,
+                    opacity: pressed ? 0.75 : 1,
+                  })}
+                >
+                  <Text
+                    variant="small"
+                    color={isSelected ? colors.primaryForeground : colors.secondaryForeground}
+                    style={{ fontWeight: '600' }}
+                  >
+                    {m.label}
+                  </Text>
+                  <Text
+                    variant="caption"
+                    color={isSelected ? colors.primaryForeground : colors.mutedForeground}
+                    style={{ marginTop: spacing[1] }}
+                  >
+                    {m.description}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        <Separator style={{ marginTop: spacing[4] }} />
+
         {/* Cuisine picker */}
         <View style={[styles.cuisineSection, { padding: spacing[4] }]}>
           <Text variant="bodyMd" style={{ marginBottom: spacing[3] }}>Select a cuisine</Text>

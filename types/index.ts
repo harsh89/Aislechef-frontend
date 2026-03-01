@@ -3,8 +3,13 @@ export type Unit = 'pcs' | 'kg' | 'g' | 'L' | 'mL' | 'tbsp' | 'tsp' | 'cup';
 export const UNITS: Unit[] = ['pcs', 'kg', 'g', 'L', 'mL', 'tbsp', 'tsp', 'cup'];
 
 export type CuisineFilter = 'Indian' | 'Chinese' | 'Italian' | 'Mexican' | 'Other';
-
 export const CUISINES: CuisineFilter[] = ['Indian', 'Chinese', 'Italian', 'Mexican', 'Other'];
+
+export type RecipeMode = 'exact' | 'detailed';
+export const RECIPE_MODES: { value: RecipeMode; label: string; description: string }[] = [
+  { value: 'exact', label: 'Exact', description: 'Only use selected ingredients' },
+  { value: 'detailed', label: 'Detailed', description: 'Include extra pantry staples' },
+];
 
 export interface GroceryList {
   listId: string;
@@ -54,7 +59,10 @@ export interface RecipeIngredient {
 
 export interface Recipe {
   name: string;
-  cuisine: string;
+  cuisine?: string;
+  servings?: number;
+  prepTime?: string;
+  cookTime?: string;
   ingredients: RecipeIngredient[];
   instructions: string[];
 }
