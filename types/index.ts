@@ -7,8 +7,8 @@ export const CUISINES: CuisineFilter[] = ['Indian', 'Chinese', 'Italian', 'Mexic
 
 export type RecipeMode = 'exact' | 'detailed';
 export const RECIPE_MODES: { value: RecipeMode; label: string; description: string }[] = [
-  { value: 'exact', label: 'Exact', description: 'Only use selected ingredients' },
   { value: 'detailed', label: 'Detailed', description: 'Include extra pantry staples' },
+  { value: 'exact', label: 'Exact', description: 'Only use selected ingredients' },
 ];
 
 export interface GroceryList {

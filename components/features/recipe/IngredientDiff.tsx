@@ -15,16 +15,21 @@ interface Props {
   localItems: GroceryItem[];
   onAddToList: (ingredient: RecipeIngredient) => Promise<void>;
   addingIds: Set<string>;
+  addedIds: Set<string>;
 }
 
 function computeDiff(
   ingredients: RecipeIngredient[],
   localItems: GroceryItem[],
 ): DiffItem[] {
+  const seen = new Set<string>();
   return ingredients.flatMap((ing) => {
+    const nameKey = ing.name.toLowerCase();
+    if (seen.has(nameKey)) return [];
+    seen.add(nameKey);
     const match = localItems.find((item) =>
-      item.itemName.toLowerCase().includes(ing.name.toLowerCase()) ||
-      ing.name.toLowerCase().includes(item.itemName.toLowerCase()),
+      item.itemName.toLowerCase().includes(nameKey) ||
+      nameKey.includes(item.itemName.toLowerCase()),
     );
     if (!match) return [{ ingredient: ing, type: 'extra' as const }];
     if (match.quantity === 0) return [{ ingredient: ing, type: 'out_of_stock' as const }];
@@ -32,7 +37,7 @@ function computeDiff(
   });
 }
 
-export function IngredientDiff({ recipeIngredients, localItems, onAddToList, addingIds }: Props) {
+export function IngredientDiff({ recipeIngredients, localItems, onAddToList, addingIds, addedIds }: Props) {
   const { colors, spacing, radius } = useTheme();
   const diffItems = computeDiff(recipeIngredients, localItems);
 
@@ -52,9 +57,10 @@ export function IngredientDiff({ recipeIngredients, localItems, onAddToList, add
     return (
       <View style={{ marginBottom: spacing[4] }}>
         <Text variant="bodyMd" style={{ marginBottom: spacing[2] }}>{title}</Text>
-        {items.map((d, i) => {
-          const key = `${d.ingredient.name}-${i}`;
+        {items.map((d) => {
+          const key = d.ingredient.name;
           const isAdding = addingIds.has(key);
+          const isAdded = addedIds.has(key);
           return (
             <View
               key={key}
@@ -78,11 +84,11 @@ export function IngredientDiff({ recipeIngredients, localItems, onAddToList, add
               </View>
               <Pressable
                 onPress={() => onAddToList(d.ingredient)}
-                disabled={isAdding}
+                disabled={isAdding || isAdded}
                 style={[
                   styles.addBtn,
                   {
-                    backgroundColor: accentColor,
+                    backgroundColor: isAdded ? colors.success : accentColor,
                     borderRadius: radius.md,
                     paddingVertical: spacing[1],
                     paddingHorizontal: spacing[3],
@@ -92,6 +98,8 @@ export function IngredientDiff({ recipeIngredients, localItems, onAddToList, add
               >
                 {isAdding ? (
                   <ActivityIndicator size="small" color={colors.primaryForeground} />
+                ) : isAdded ? (
+                  <Text variant="small" color={colors.primaryForeground}>✓ Added</Text>
                 ) : (
                   <Text variant="small" color={colors.primaryForeground}>+ Add</Text>
                 )}

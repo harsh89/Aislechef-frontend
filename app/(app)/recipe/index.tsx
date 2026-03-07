@@ -37,8 +37,9 @@ export default function RecipeScreen() {
 
   const { colors, spacing, radius } = useTheme();
   const [cuisine, setCuisine] = useState<CuisineFilter | null>(null);
-  const [recipeMode, setRecipeMode] = useState<RecipeMode>('exact');
+  const [recipeMode, setRecipeMode] = useState<RecipeMode>('detailed');
   const [addingIds, setAddingIds] = useState<Set<string>>(new Set());
+  const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
 
   // Load all local items for ingredient diff
   const { data: listData } = useInfiniteQuery({
@@ -68,13 +69,13 @@ export default function RecipeScreen() {
     },
   });
 
-  function handleCuisineSelect(c: CuisineFilter) {
-    setCuisine(c);
-    reccoMutation.mutate(c);
+  function handleGenerate() {
+    if (!cuisine) return;
+    reccoMutation.mutate(cuisine);
   }
 
   async function handleAddToList(ingredient: RecipeIngredient) {
-    const key = `${ingredient.name}-0`;
+    const key = ingredient.name;
     setAddingIds((prev) => new Set(prev).add(key));
     try {
       await api.post(`/lists/${listId}/items`, {
@@ -82,6 +83,7 @@ export default function RecipeScreen() {
         quantity: ingredient.quantity || 1,
         unit: ingredient.unit || 'pcs',
       });
+      setAddedIds((prev) => new Set(prev).add(key));
     } catch {
       Alert.alert('Error', `Could not add ${ingredient.name} to list.`);
     } finally {
@@ -152,7 +154,7 @@ export default function RecipeScreen() {
               return (
                 <Pressable
                   key={c}
-                  onPress={() => handleCuisineSelect(c)}
+                  onPress={() => setCuisine(c)}
                   disabled={reccoMutation.isPending}
                   style={({ pressed }) => [
                     styles.cuisinePill,
@@ -177,19 +179,31 @@ export default function RecipeScreen() {
               );
             })}
           </ScrollView>
+
+          {/* Generate button */}
+          <Pressable
+            onPress={handleGenerate}
+            disabled={!cuisine || reccoMutation.isPending}
+            style={({ pressed }) => ({
+              marginTop: spacing[4],
+              paddingVertical: spacing[3],
+              borderRadius: radius.md,
+              backgroundColor: colors.primary,
+              alignItems: 'center',
+              opacity: !cuisine || reccoMutation.isPending ? 0.5 : pressed ? 0.8 : 1,
+            })}
+          >
+            {reccoMutation.isPending ? (
+              <ActivityIndicator color={colors.primaryForeground} size="small" />
+            ) : (
+              <Text variant="bodyMd" color={colors.primaryForeground} style={{ fontWeight: '600' }}>
+                Generate Recipes
+              </Text>
+            )}
+          </Pressable>
         </View>
 
         <Separator />
-
-        {/* Loading */}
-        {reccoMutation.isPending && (
-          <View style={[styles.center, { paddingVertical: spacing[16] }]}>
-            <ActivityIndicator color={colors.primary} size="large" />
-            <Text variant="body" muted style={{ marginTop: spacing[4] }}>
-              Generating recipes…
-            </Text>
-          </View>
-        )}
 
         {/* Error state */}
         {reccoMutation.isError && !reccoMutation.isPending && (
@@ -222,6 +236,7 @@ export default function RecipeScreen() {
               localItems={localItems}
               onAddToList={handleAddToList}
               addingIds={addingIds}
+              addedIds={addedIds}
             />
           </View>
         )}
@@ -229,7 +244,9 @@ export default function RecipeScreen() {
         {/* Prompt state */}
         {!reccoMutation.isPending && !reccoMutation.isError && recipes.length === 0 && (
           <View style={[styles.center, { paddingVertical: spacing[12] }]}>
-            <Text variant="body" muted>Pick a cuisine above to get recipes.</Text>
+            <Text variant="body" muted>
+              {cuisine ? 'Tap Generate Recipes to continue.' : 'Pick a cuisine above to get started.'}
+            </Text>
           </View>
         )}
       </ScrollView>

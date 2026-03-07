@@ -7,6 +7,7 @@ import {
   Alert,
   Modal,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { useTheme } from '../../../hooks/useTheme';
 import { Text } from '../../ui/Text';
@@ -16,12 +17,13 @@ import type { GroceryItem, Unit } from '../../../types';
 interface Props {
   item: GroceryItem;
   selected: boolean;
+  isDeleting: boolean;
   onToggleSelect: () => void;
   onUpdate: (patch: { itemName: string; quantity: number; unit: Unit }) => Promise<void>;
   onDelete: () => void;
 }
 
-export function ItemRow({ item, selected, onToggleSelect, onUpdate, onDelete }: Props) {
+export function ItemRow({ item, selected, isDeleting, onToggleSelect, onUpdate, onDelete }: Props) {
   const { colors, spacing, radius } = useTheme();
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(item.itemName);
@@ -29,6 +31,7 @@ export function ItemRow({ item, selected, onToggleSelect, onUpdate, onDelete }: 
   const [draftUnit, setDraftUnit] = useState<Unit>(item.unit);
   const [unitPickerVisible, setUnitPickerVisible] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   function startEdit() {
     setDraftName(item.itemName);
@@ -180,8 +183,10 @@ export function ItemRow({ item, selected, onToggleSelect, onUpdate, onDelete }: 
 
       {/* Delete */}
       {!editing && (
-        <Pressable onPress={handleDelete} hitSlop={8} style={styles.deleteBtn}>
-          <Text variant="small" color={colors.destructive}>✕</Text>
+        <Pressable onPress={handleDelete} hitSlop={8} style={styles.deleteBtn} disabled={isDeleting}>
+          {isDeleting
+            ? <ActivityIndicator size="small" color={colors.destructive} />
+            : <Text variant="small" color={colors.destructive}>✕</Text>}
         </Pressable>
       )}
 

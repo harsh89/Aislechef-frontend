@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import { useLocalSearchParams, useRouter, Stack, useFocusEffect } from 'expo-router';
 import {
   useInfiniteQuery,
   useMutation,
@@ -44,6 +44,13 @@ export default function ListDetailScreen() {
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
 
+  useFocusEffect(
+    useCallback(() => {
+      qc.invalidateQueries({ queryKey: ['list-meta', listId] });
+      qc.invalidateQueries({ queryKey: ['items', listId] });
+    }, [qc, listId]),
+  );
+
   // ── List metadata (name) ──────────────────────────────────────────────────
   const { data: listMeta } = useQuery({
     queryKey: ['list-meta', listId],
@@ -59,6 +66,7 @@ export default function ListDetailScreen() {
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
+    isFetching,
     isLoading,
     isError,
   } = useInfiniteQuery({
@@ -103,16 +111,8 @@ export default function ListDetailScreen() {
       unit: Unit;
     }) =>
       api.post<GroceryItem>(`/lists/${listId}/items`, { itemName, quantity, unit }),
-    onSuccess: (created) => {
-      qc.setQueryData(['items', listId], (old: typeof infiniteData) => {
-        if (!old) return old;
-        return {
-          ...old,
-          pages: old.pages.map((page, idx) =>
-            idx === 0 ? { ...page, items: [created, ...page.items] } : page,
-          ),
-        };
-      });
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['items', listId] });
     },
     onError: () => Alert.alert('Error', 'Could not add item.'),
   });
@@ -305,6 +305,15 @@ export default function ListDetailScreen() {
         )}
       </View>
 
+      {/* Background fetch indicator */}
+      {isFetching && !isLoading && (
+        <ActivityIndicator
+          size="small"
+          color={colors.primary}
+          style={{ marginVertical: spacing[2] }}
+        />
+      )}
+
       {/* Items list */}
       {isLoading && !searchQuery ? (
         <View style={styles.center}>
@@ -322,6 +331,7 @@ export default function ListDetailScreen() {
             <ItemRow
               item={item}
               selected={selectedIds.has(item.itemId)}
+              isDeleting={deleteMutation.isPending && deleteMutation.variables === item.itemId}
               onToggleSelect={() => toggleSelect(item.itemId)}
               onUpdate={async (patch) => {
                 await updateMutation.mutateAsync({ itemId: item.itemId, ...patch });

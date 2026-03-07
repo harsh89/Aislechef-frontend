@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   FlatList,
@@ -9,7 +9,7 @@ import {
   Pressable,
   ActivityIndicator,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api } from '../../lib/api';
@@ -31,6 +31,12 @@ export default function ListsScreen() {
     queryKey: ['lists'],
     queryFn: () => api.get<GroceryList[]>('/lists'),
   });
+
+  useFocusEffect(
+    useCallback(() => {
+      qc.invalidateQueries({ queryKey: ['lists'] });
+    }, [qc]),
+  );
 
   const createMutation = useMutation({
     mutationFn: (name: string) => api.post<GroceryList>('/lists', { name }),
