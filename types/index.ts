@@ -2,6 +2,23 @@ export type Unit = 'pcs' | 'kg' | 'g' | 'L' | 'mL' | 'tbsp' | 'tsp' | 'cup';
 
 export const UNITS: Unit[] = ['pcs', 'kg', 'g', 'L', 'mL', 'tbsp', 'tsp', 'cup'];
 
+const UNIT_MAP: Record<string, Unit> = {
+  pcs: 'pcs', piece: 'pcs', pieces: 'pcs', whole: 'pcs', count: 'pcs',
+  kg: 'kg', kilogram: 'kg', kilograms: 'kg',
+  g: 'g', gram: 'g', grams: 'g',
+  l: 'L', liter: 'L', liters: 'L', litre: 'L', litres: 'L',
+  ml: 'mL', milliliter: 'mL', milliliters: 'mL', millilitre: 'mL', millilitres: 'mL',
+  tbsp: 'tbsp', tablespoon: 'tbsp', tablespoons: 'tbsp',
+  tsp: 'tsp', teaspoon: 'tsp', teaspoons: 'tsp',
+  cup: 'cup', cups: 'cup',
+};
+
+export function normalizeUnit(raw: string | undefined | null): Unit {
+  if (!raw) return 'pcs';
+  const key = raw.trim().toLowerCase();
+  return UNIT_MAP[key] ?? 'pcs';
+}
+
 export type CuisineFilter = 'Indian' | 'Chinese' | 'Italian' | 'Mexican' | 'Other';
 export const CUISINES: CuisineFilter[] = ['Indian', 'Chinese', 'Italian', 'Mexican', 'Other'];
 

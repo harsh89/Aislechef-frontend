@@ -3,7 +3,7 @@ import { View, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
 import { useTheme } from '../../../hooks/useTheme';
 import { Text } from '../../ui/Text';
 import { Separator } from '../../ui/Separator';
-import type { RecipeIngredient, GroceryItem, Unit } from '../../../types';
+import type { RecipeIngredient, GroceryItem } from '../../../types';
 
 interface DiffItem {
   ingredient: RecipeIngredient;
@@ -24,13 +24,11 @@ function computeDiff(
 ): DiffItem[] {
   const seen = new Set<string>();
   return ingredients.flatMap((ing) => {
-    const nameKey = ing.name.toLowerCase();
+    const nameKey = ing?.name?.trim().toLowerCase().split(' ').filter(Boolean).sort().join(' ') || '';
     if (seen.has(nameKey)) return [];
     seen.add(nameKey);
     const match = localItems.find((item) =>
-      item.itemName.toLowerCase().includes(nameKey) ||
-      nameKey.includes(item.itemName.toLowerCase()),
-    );
+      item.itemName.trim().toLowerCase().split(' ').filter(Boolean).sort().join(' ') === nameKey)
     if (!match) return [{ ingredient: ing, type: 'extra' as const }];
     if (match.quantity === 0) return [{ ingredient: ing, type: 'out_of_stock' as const }];
     return [];

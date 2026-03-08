@@ -16,7 +16,7 @@ import { Text } from '../../../components/ui/Text';
 import { Separator } from '../../../components/ui/Separator';
 import { RecipeCard } from '../../../components/features/recipe/RecipeCard';
 import { IngredientDiff } from '../../../components/features/recipe/IngredientDiff';
-import { CUISINES, RECIPE_MODES } from '../../../types';
+import { CUISINES, RECIPE_MODES, normalizeUnit } from '../../../types';
 import type {
   CuisineFilter,
   RecipeMode,
@@ -81,7 +81,7 @@ export default function RecipeScreen() {
       await api.post(`/lists/${listId}/items`, {
         itemName: ingredient.name,
         quantity: ingredient.quantity || 1,
-        unit: ingredient.unit || 'pcs',
+        unit: normalizeUnit(ingredient.unit),
       });
       setAddedIds((prev) => new Set(prev).add(key));
     } catch {
