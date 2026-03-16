@@ -9,7 +9,7 @@ import {
   Pressable,
   ActivityIndicator,
 } from 'react-native';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect, Stack } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api } from '../../lib/api';
@@ -88,6 +88,7 @@ export default function ListsScreen() {
 
   return (
     <SafeAreaView style={[styles.flex, { backgroundColor: colors.background }]} edges={['top']}>
+      <Stack.Screen options={{ title: 'My Lists' }} />
       {/* Header */}
       <View style={[styles.header, { paddingHorizontal: spacing[4], borderBottomColor: colors.border }]}>
         <Text variant="h2">My Lists</Text>

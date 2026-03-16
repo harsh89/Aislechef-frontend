@@ -16,14 +16,14 @@ import type { GroceryItem, Unit } from '../../../types';
 
 interface Props {
   item: GroceryItem;
-  selected: boolean;
+  isCompleted: boolean;
   isDeleting: boolean;
-  onToggleSelect: () => void;
+  onToggleComplete: () => void;
   onUpdate: (patch: { itemName: string; quantity: number; unit: Unit }) => Promise<void>;
   onDelete: () => void;
 }
 
-export function ItemRow({ item, selected, isDeleting, onToggleSelect, onUpdate, onDelete }: Props) {
+export function ItemRow({ item, isCompleted, isDeleting, onToggleComplete, onUpdate, onDelete }: Props) {
   const { colors, spacing, radius } = useTheme();
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(item.itemName);
@@ -31,7 +31,6 @@ export function ItemRow({ item, selected, isDeleting, onToggleSelect, onUpdate, 
   const [draftUnit, setDraftUnit] = useState<Unit>(item.unit);
   const [unitPickerVisible, setUnitPickerVisible] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
 
   function startEdit() {
     setDraftName(item.itemName);
@@ -68,7 +67,7 @@ export function ItemRow({ item, selected, isDeleting, onToggleSelect, onUpdate, 
       style={[
         styles.row,
         {
-          backgroundColor: selected ? colors.primary + '12' : colors.background,
+          backgroundColor: colors.background,
           borderBottomWidth: StyleSheet.hairlineWidth,
           borderBottomColor: colors.border,
           paddingVertical: spacing[3],
@@ -77,24 +76,24 @@ export function ItemRow({ item, selected, isDeleting, onToggleSelect, onUpdate, 
       ]}
     >
       {/* Checkbox */}
-      <Pressable onPress={onToggleSelect} style={styles.checkboxWrap} hitSlop={8} testID="item-checkbox">
+      <Pressable onPress={onToggleComplete} style={styles.checkboxWrap} hitSlop={8} testID="item-checkbox">
         <View
           style={[
             styles.checkbox,
             {
-              width: 22,
-              height: 22,
-              borderRadius: 11,
+              width: 30,
+              height: 30,
+              borderRadius: 15,
               borderWidth: 2,
-              borderColor: selected ? colors.primary : colors.border,
-              backgroundColor: selected ? colors.primary : 'transparent',
+              borderColor: isCompleted ? '#22c55e' : colors.border,
+              backgroundColor: isCompleted ? '#22c55e' : 'transparent',
               alignItems: 'center',
               justifyContent: 'center',
             },
           ]}
         >
-          {selected && (
-            <Text variant="caption" color={colors.primaryForeground} style={styles.checkmark}>
+          {isCompleted && (
+            <Text variant="bodyMd" color="#ffffff" style={styles.checkmark}>
               ✓
             </Text>
           )}
@@ -161,33 +160,51 @@ export function ItemRow({ item, selected, isDeleting, onToggleSelect, onUpdate, 
             </View>
             {/* Actions */}
             <View style={styles.editActions}>
-              <Pressable onPress={cancelEdit} hitSlop={8}>
-                <Text variant="small" color={colors.textMuted}>✕</Text>
+              <Pressable
+                onPress={cancelEdit}
+                style={[styles.editActionBtn, { backgroundColor: colors.border }]}
+              >
+                <Text style={styles.editActionIcon} color={colors.text}>✕</Text>
               </Pressable>
-              <Pressable onPress={commitEdit} disabled={saving} hitSlop={8}>
-                <Text variant="small" color={colors.primary}>
+              <Pressable
+                onPress={commitEdit}
+                disabled={saving}
+                style={[styles.editActionBtn, { backgroundColor: colors.primary, opacity: saving ? 0.6 : 1 }]}
+              >
+                <Text style={styles.editActionIcon} color={colors.primaryForeground}>
                   {saving ? '…' : '✓'}
                 </Text>
               </Pressable>
             </View>
           </View>
         ) : (
-          <Pressable onPress={startEdit} style={styles.displayContent}>
-            <Text variant="bodyMd" numberOfLines={1}>{item.itemName}</Text>
-            <Text variant="small" muted>
+          <View style={styles.displayContent}>
+            <Text
+              variant="bodyMd"
+              numberOfLines={1}
+              style={isCompleted ? { textDecorationLine: 'line-through', opacity: 0.45 } : undefined}
+            >
+              {item.itemName}
+            </Text>
+            <Text variant="small" muted style={isCompleted ? { opacity: 0.45 } : undefined}>
               {item.quantity} {item.unit}
             </Text>
-          </Pressable>
+          </View>
         )}
       </View>
 
-      {/* Delete */}
+      {/* Edit + Delete */}
       {!editing && (
-        <Pressable onPress={handleDelete} hitSlop={8} style={styles.deleteBtn} disabled={isDeleting}>
-          {isDeleting
-            ? <ActivityIndicator size="small" color={colors.destructive} />
-            : <Text variant="small" color={colors.destructive}>✕</Text>}
-        </Pressable>
+        <View style={styles.rowActions}>
+          <Pressable onPress={startEdit} hitSlop={8} style={styles.actionBtn}>
+            <Text style={styles.actionIcon} color={colors.textMuted}>✎</Text>
+          </Pressable>
+          <Pressable onPress={handleDelete} hitSlop={8} style={styles.actionBtn} disabled={isDeleting}>
+            {isDeleting
+              ? <ActivityIndicator size="small" color={colors.destructive} />
+              : <Text style={styles.actionIcon} color={colors.destructive}>✕</Text>}
+          </Pressable>
+        </View>
       )}
 
       {/* Unit picker modal */}
@@ -255,8 +272,12 @@ const styles = StyleSheet.create({
   editQtyRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   editQtyInput: {},
   unitBtn: {},
-  editActions: { flexDirection: 'row', gap: 16, justifyContent: 'flex-end', marginTop: 4 },
-  deleteBtn: { marginLeft: 12, padding: 4 },
+  editActions: { flexDirection: 'row', gap: 10, justifyContent: 'flex-end', marginTop: 6 },
+  editActionBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  editActionIcon: { fontSize: 20, lineHeight: 24, fontWeight: '600' },
+  rowActions: { flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 8 },
+  actionBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  actionIcon: { fontSize: 20, lineHeight: 24 },
   pickerOverlay: { flex: 1, justifyContent: 'flex-end' },
   pickerSheet: { maxHeight: 400 },
   unitOption: { paddingHorizontal: 4 },

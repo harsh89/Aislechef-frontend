@@ -45,6 +45,7 @@ export interface GroceryItem {
   lastUpdated: string;
   createdAt?: string;
   isDeleted?: boolean;
+  isCompleted?: boolean;
 }
 
 export interface Pagination {

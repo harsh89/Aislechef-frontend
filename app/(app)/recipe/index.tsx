@@ -7,7 +7,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { useLocalSearchParams, Stack } from 'expo-router';
+import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { useMutation, useInfiniteQuery } from '@tanstack/react-query';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api, ApiError } from '../../../lib/api';
@@ -29,17 +29,24 @@ import type {
 const LIMIT = 100; // load all for diff purposes
 
 export default function RecipeScreen() {
-  const { listId, selectedItemIds: rawIds } = useLocalSearchParams<{
-    listId: string;
-    selectedItemIds: string;
-  }>();
-  const selectedItemIds: string[] = rawIds ? JSON.parse(rawIds) : [];
+  const { listId } = useLocalSearchParams<{ listId: string }>();
 
+  const router = useRouter();
   const { colors, spacing, radius } = useTheme();
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [cuisine, setCuisine] = useState<CuisineFilter | null>(null);
   const [recipeMode, setRecipeMode] = useState<RecipeMode>('detailed');
   const [addingIds, setAddingIds] = useState<Set<string>>(new Set());
   const [addedIds, setAddedIds] = useState<Set<string>>(new Set());
+
+  function toggleItemSelect(itemId: string) {
+    setSelectedItemIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  }
 
   // Load all local items for ingredient diff
   const { data: listData } = useInfiniteQuery({
@@ -56,7 +63,7 @@ export default function RecipeScreen() {
   const reccoMutation = useMutation({
     mutationFn: (cuisineFilter: CuisineFilter) => {
       const selectedItems = localItems
-        .filter((item) => selectedItemIds.includes(item.itemId))
+        .filter((item) => selectedItemIds.has(item.itemId))
         .map((item) => item.itemName);
       return api.post<ReccoResponse>('/recco', { cuisineFilter, selectedItems, recipeMode });
     },
@@ -102,6 +109,45 @@ export default function RecipeScreen() {
       <Stack.Screen options={{ title: 'Create Recipe', headerShown: true }} />
 
       <ScrollView contentContainerStyle={{ paddingBottom: spacing[8] }} keyboardShouldPersistTaps="handled">
+        {/* Item selection */}
+        <View style={{ padding: spacing[4], paddingBottom: 0 }}>
+          <Text variant="bodyMd" style={{ marginBottom: spacing[1] }}>Select items</Text>
+          <Text variant="caption" muted style={{ marginBottom: spacing[3] }}>
+            {selectedItemIds.size < 2
+              ? `Pick at least 2 (${selectedItemIds.size} selected)`
+              : `${selectedItemIds.size} selected`}
+          </Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: spacing[2] }}>
+            {localItems.map((item) => {
+              const isSelected = selectedItemIds.has(item.itemId);
+              return (
+                <Pressable
+                  key={item.itemId}
+                  onPress={() => toggleItemSelect(item.itemId)}
+                  style={({ pressed }) => ({
+                    paddingVertical: spacing[2],
+                    paddingHorizontal: spacing[3],
+                    borderRadius: radius.full,
+                    borderWidth: 1,
+                    borderColor: isSelected ? colors.primary : colors.border,
+                    backgroundColor: isSelected ? colors.primary : colors.secondary,
+                    opacity: pressed ? 0.75 : 1,
+                  })}
+                >
+                  <Text
+                    variant="small"
+                    color={isSelected ? colors.primaryForeground : colors.secondaryForeground}
+                  >
+                    {item.itemName}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        <Separator style={{ marginTop: spacing[4] }} />
+
         {/* Mode toggle */}
         <View style={{ padding: spacing[4], paddingBottom: 0 }}>
           <Text variant="bodyMd" style={{ marginBottom: spacing[3] }}>Recipe mode</Text>
@@ -183,14 +229,14 @@ export default function RecipeScreen() {
           {/* Generate button */}
           <Pressable
             onPress={handleGenerate}
-            disabled={!cuisine || reccoMutation.isPending}
+            disabled={!cuisine || selectedItemIds.size < 2 || reccoMutation.isPending}
             style={({ pressed }) => ({
               marginTop: spacing[4],
               paddingVertical: spacing[3],
               borderRadius: radius.md,
               backgroundColor: colors.primary,
               alignItems: 'center',
-              opacity: !cuisine || reccoMutation.isPending ? 0.5 : pressed ? 0.8 : 1,
+              opacity: !cuisine || selectedItemIds.size < 2 || reccoMutation.isPending ? 0.5 : pressed ? 0.8 : 1,
             })}
           >
             {reccoMutation.isPending ? (
@@ -245,11 +291,31 @@ export default function RecipeScreen() {
         {!reccoMutation.isPending && !reccoMutation.isError && recipes.length === 0 && (
           <View style={[styles.center, { paddingVertical: spacing[12] }]}>
             <Text variant="body" muted>
-              {cuisine ? 'Tap Generate Recipes to continue.' : 'Pick a cuisine above to get started.'}
+              {selectedItemIds.size < 2
+                ? 'Select at least 2 items above to get started.'
+                : !cuisine
+                  ? 'Pick a cuisine above to get started.'
+                  : 'Tap Generate Recipes to continue.'}
             </Text>
           </View>
         )}
       </ScrollView>
+
+      {/* Back to list */}
+      <Pressable
+        onPress={() => router.back()}
+        style={({ pressed }) => ({
+          margin: spacing[4],
+          paddingVertical: spacing[3],
+          borderRadius: radius.md,
+          borderWidth: 1,
+          borderColor: colors.border,
+          alignItems: 'center',
+          opacity: pressed ? 0.7 : 1,
+        })}
+      >
+        <Text variant="bodyMd" color={colors.text}>← Back to List</Text>
+      </Pressable>
     </SafeAreaView>
   );
 }

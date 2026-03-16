@@ -36,10 +36,9 @@ export default function ListDetailScreen() {
   const { listId } = useLocalSearchParams<{ listId: string }>();
   const router = useRouter();
   const qc = useQueryClient();
-  const { colors, spacing, radius, shadow } = useTheme();
+  const { colors, spacing, radius } = useTheme();
 
   const addSheetRef = useRef<BottomSheet>(null);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState('');
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
@@ -95,9 +94,16 @@ export default function ListDetailScreen() {
     staleTime: 0,
   });
 
-  const displayItems: GroceryItem[] = searchQuery
-    ? (searchData?.results ?? [])
-    : items;
+  const baseItems: GroceryItem[] = searchQuery ? (searchData?.results ?? []) : items;
+
+  const displayItems = useMemo(
+    () =>
+      [...baseItems].sort((a, b) => {
+        if (!!a.isCompleted === !!b.isCompleted) return 0;
+        return a.isCompleted ? 1 : -1;
+      }),
+    [baseItems],
+  );
 
   // ── Add item ──────────────────────────────────────────────────────────────
   const addMutation = useMutation({
@@ -165,13 +171,36 @@ export default function ListDetailScreen() {
           })),
         };
       });
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        next.delete(itemId);
-        return next;
-      });
     },
     onError: () => Alert.alert('Error', 'Could not delete item.'),
+  });
+
+  // ── Toggle item complete ───────────────────────────────────────────────────
+  const completeMutation = useMutation({
+    mutationFn: ({ itemId, isCompleted }: { itemId: string; isCompleted: boolean }) =>
+      api.put<GroceryItem>(`/lists/${listId}/items/${itemId}`, { isCompleted }),
+    onSuccess: (updated) => {
+      qc.setQueryData(['items', listId], (old: typeof infiniteData) => {
+        if (!old) return old;
+        return {
+          ...old,
+          pages: old.pages.map((page) => ({
+            ...page,
+            items: page.items.map((i) => (i.itemId === updated.itemId ? updated : i)),
+          })),
+        };
+      });
+    },
+    onError: () => Alert.alert('Error', 'Could not update item.'),
+  });
+
+  // ── Reset completed items ─────────────────────────────────────────────────
+  const resetMutation = useMutation({
+    mutationFn: () => api.post(`/lists/${listId}/items/reset-completed`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['items', listId] });
+    },
+    onError: () => Alert.alert('Error', 'Could not reset items.'),
   });
 
   // ── Rename list ───────────────────────────────────────────────────────────
@@ -187,15 +216,6 @@ export default function ListDetailScreen() {
   });
 
   // ── Handlers ──────────────────────────────────────────────────────────────
-  function toggleSelect(itemId: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(itemId)) next.delete(itemId);
-      else next.add(itemId);
-      return next;
-    });
-  }
-
   function commitTitleRename() {
     const trimmed = titleDraft.trim();
     if (trimmed && trimmed !== listMeta?.name) renameMutation.mutate(trimmed);
@@ -213,10 +233,7 @@ export default function ListDetailScreen() {
   function navigateToRecipe() {
     router.push({
       pathname: '/(app)/recipe/',
-      params: {
-        listId,
-        selectedItemIds: JSON.stringify([...selectedIds]),
-      },
+      params: { listId },
     });
   }
 
@@ -247,6 +264,7 @@ export default function ListDetailScreen() {
     <SafeAreaView style={[styles.flex, { backgroundColor: colors.background }]} edges={['bottom']}>
       <Stack.Screen
         options={{
+          title: listName,
           headerShown: true,
           headerTitle: () =>
             editingTitle ? (
@@ -270,6 +288,20 @@ export default function ListDetailScreen() {
                 <Text variant="h3" numberOfLines={1}>{listName}</Text>
               </Pressable>
             ),
+          headerRight: () => (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing[3], marginRight: spacing[1] }}>
+              {items.some((i) => i.isCompleted) && (
+                <Pressable onPress={() => resetMutation.mutate()} disabled={resetMutation.isPending} hitSlop={8}>
+                  {resetMutation.isPending
+                    ? <ActivityIndicator size="small" color={colors.textMuted} />
+                    : <Text variant="small" color={colors.textMuted}>Reset</Text>}
+                </Pressable>
+              )}
+              <Pressable onPress={navigateToRecipe} hitSlop={8}>
+                <Text variant="small" color={colors.primary}>Recipe</Text>
+              </Pressable>
+            </View>
+          ),
         }}
       />
 
@@ -330,9 +362,11 @@ export default function ListDetailScreen() {
           renderItem={({ item }) => (
             <ItemRow
               item={item}
-              selected={selectedIds.has(item.itemId)}
+              isCompleted={!!item.isCompleted}
               isDeleting={deleteMutation.isPending && deleteMutation.variables === item.itemId}
-              onToggleSelect={() => toggleSelect(item.itemId)}
+              onToggleComplete={() =>
+                completeMutation.mutate({ itemId: item.itemId, isCompleted: !item.isCompleted })
+              }
               onUpdate={async (patch) => {
                 await updateMutation.mutateAsync({ itemId: item.itemId, ...patch });
               }}
@@ -346,30 +380,6 @@ export default function ListDetailScreen() {
           keyboardShouldPersistTaps="handled"
           style={styles.flex}
         />
-      )}
-
-      {/* Recipe button (shown when ≥2 selected) */}
-      {selectedIds.size >= 2 && (
-        <Pressable
-          onPress={navigateToRecipe}
-          style={({ pressed }) => [
-            styles.recipePill,
-            {
-              backgroundColor: colors.primary,
-              borderRadius: radius.full,
-              paddingVertical: spacing[3],
-              paddingHorizontal: spacing[6],
-              marginHorizontal: spacing[4],
-              marginBottom: spacing[2],
-              opacity: pressed ? 0.85 : 1,
-              ...shadow.md,
-            },
-          ]}
-        >
-          <Text variant="bodyMd" color={colors.primaryForeground}>
-            Create Recipe ({selectedIds.size})
-          </Text>
-        </Pressable>
       )}
 
       {/* Add Item bar */}
@@ -405,6 +415,5 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   footerLoader: { alignItems: 'center' },
   emptyState: { alignItems: 'center' },
-  recipePill: { alignItems: 'center' },
   addBar: { borderTopWidth: StyleSheet.hairlineWidth, alignItems: 'center' },
 });
