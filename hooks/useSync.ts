@@ -1,11 +1,13 @@
 import { useEffect, useRef } from 'react';
 import NetInfo from '@react-native-community/netinfo';
-import { api, ApiError } from '../lib/api';
-import { getDatabase } from '../lib/database';
-import type { SyncList, SyncItem, SyncResponse } from '../types';
+import { useQueryClient, QueryClient } from '@tanstack/react-query';
+import { api } from '../lib/api';
+import { localStore } from '../lib/localStore';
+import type { SyncResponse } from '../types';
 
 export function useSync(onConflict: () => void) {
   const wasOffline = useRef(false);
+  const qc = useQueryClient();
 
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener(async (state) => {
@@ -20,44 +22,39 @@ export function useSync(onConflict: () => void) {
       wasOffline.current = false;
 
       try {
-        await syncToServer(onConflict);
+        await syncToServer(onConflict, qc);
       } catch {
         // silently ignore sync errors
       }
     });
 
     return unsubscribe;
-  }, [onConflict]);
+  }, [onConflict, qc]);
 }
 
-async function syncToServer(onConflict: () => void) {
-  const db = await getDatabase();
-
+async function syncToServer(onConflict: () => void, qc: QueryClient) {
   const [lists, items] = await Promise.all([
-    db.getAllAsync<SyncList & { synced: number }>(
-      'SELECT listId, name, lastUpdated, isDeleted FROM lists WHERE synced = 0',
-    ),
-    db.getAllAsync<SyncItem & { synced: number }>(
-      'SELECT itemId, listId, itemName, quantity, unit, lastUpdated, isDeleted FROM items WHERE synced = 0',
-    ),
+    localStore.getUnsyncedLists(),
+    localStore.getUnsyncedItems(),
   ]);
 
   if (lists.length === 0 && items.length === 0) return;
 
   const response = await api.post<SyncResponse>('/sync', {
-    lists: lists.map(({ ...l }) => ({ ...l, isDeleted: Boolean(l.isDeleted) })),
-    items: items.map(({ ...i }) => ({ ...i, isDeleted: Boolean(i.isDeleted) })),
+    lists: lists.map((l) => ({ ...l, isDeleted: Boolean(l.isDeleted) })),
+    items: items.map((i) => ({
+      ...i,
+      isDeleted: Boolean(i.isDeleted),
+      isCompleted: Boolean(i.isCompleted),
+    })),
   });
 
-  // Mark as synced
-  await db.runAsync(
-    `UPDATE lists SET synced = 1 WHERE listId IN (${lists.map(() => '?').join(',')})`,
-    lists.map((l) => l.listId),
-  );
-  await db.runAsync(
-    `UPDATE items SET synced = 1 WHERE itemId IN (${items.map(() => '?').join(',')})`,
-    items.map((i) => i.itemId),
-  );
+  await localStore.markListsSynced(lists.map((l) => l.listId));
+  await localStore.markItemsSynced(items.map((i) => i.itemId));
+
+  // Invalidate React Query caches so screens reflect server truth
+  qc.invalidateQueries({ queryKey: ['lists'] });
+  qc.invalidateQueries({ queryKey: ['items'] });
 
   if (response.conflicts && response.conflicts.length > 0) {
     onConflict();

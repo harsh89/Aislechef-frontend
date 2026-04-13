@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   FlatList,
@@ -8,11 +8,13 @@ import {
   Modal,
   Pressable,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { useRouter, useFocusEffect, Stack } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api } from '../../lib/api';
+import { localStore } from '../../lib/localStore';
 import { supabase } from '../../lib/supabase';
 import { useTheme } from '../../hooks/useTheme';
 import { Text } from '../../components/ui/Text';
@@ -27,9 +29,42 @@ export default function ListsScreen() {
   const [createVisible, setCreateVisible] = useState(false);
   const [newName, setNewName] = useState('');
 
-  const { data: lists = [], isLoading, isError } = useQuery({
+  // ── Seed cache from SQLite on first mount (instant display) ──────────────
+  useEffect(() => {
+    if (qc.getQueryData(['lists'])) return;
+    localStore.getLists().then((locals) => {
+      if (locals.length > 0) qc.setQueryData<GroceryList[]>(['lists'], locals);
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Fetch from server, merge in local unsynced lists ─────────────────────
+  const { data: lists = [], isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ['lists'],
-    queryFn: () => api.get<GroceryList[]>('/lists'),
+    queryFn: async () => {
+      const serverLists = await api.get<GroceryList[]>('/lists');
+
+      // Update SQLite with fresh server data (background, don't block render)
+      Promise.all(
+        serverLists.map((l) => localStore.upsertList({ ...l, isDeleted: false }, 1)),
+      ).catch(() => {});
+
+      // Merge in any local lists not yet on the server
+      const unsynced = await localStore.getUnsyncedLists();
+      const localNew = unsynced.filter(
+        (l) => !l.isDeleted && !serverLists.some((s) => s.listId === l.listId),
+      );
+
+      if (localNew.length > 0) {
+        const mapped: GroceryList[] = localNew.map((l) => ({
+          listId: l.listId,
+          name: l.name,
+          lastUpdated: l.lastUpdated,
+        }));
+        return [...mapped, ...serverLists];
+      }
+
+      return serverLists;
+    },
   });
 
   useFocusEffect(
@@ -38,48 +73,101 @@ export default function ListsScreen() {
     }, [qc]),
   );
 
+  // ── Create list (offline-first) ───────────────────────────────────────────
   const createMutation = useMutation({
-    mutationFn: (name: string) => api.post<GroceryList>('/lists', { name }),
-    onSuccess: (created) => {
-      qc.setQueryData<GroceryList[]>(['lists'], (prev = []) => [created, ...prev]);
-      setCreateVisible(false);
-      setNewName('');
+    mutationFn: async ({ name, tempId }: { name: string; tempId: string }) => {
+      const serverList = await api.post<GroceryList>('/lists', { name });
+      await localStore.replaceListId(tempId, serverList);
+      return { tempId, serverList };
     },
-    onError: () => Alert.alert('Error', 'Could not create list.'),
+    onSuccess: ({ tempId, serverList }) => {
+      qc.setQueryData<GroceryList[]>(['lists'], (prev = []) =>
+        prev.map((l) => (l.listId === tempId ? serverList : l)),
+      );
+    },
+    // No onError: local SQLite entry (synced=0) will sync on reconnect
   });
 
+  async function handleCreate() {
+    const name = newName.trim();
+    if (!name) return;
+
+    const tempId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const tempList: GroceryList = { listId: tempId, name, lastUpdated: now };
+
+    // 1. Write to SQLite immediately (unsynced)
+    await localStore.upsertList({ ...tempList, isDeleted: false }, 0);
+
+    // 2. Optimistic cache update
+    qc.setQueryData<GroceryList[]>(['lists'], (prev = []) => [tempList, ...prev]);
+
+    setCreateVisible(false);
+    setNewName('');
+
+    // 3. Background API call
+    createMutation.mutate({ name, tempId });
+  }
+
+  // ── Delete list (offline-first) ───────────────────────────────────────────
   const deleteMutation = useMutation({
-    mutationFn: (listId: string) => api.delete(`/lists/${listId}`),
-    onSuccess: (_, listId) => {
-      qc.setQueryData<GroceryList[]>(['lists'], (prev = []) =>
-        prev.filter((l) => l.listId !== listId),
-      );
+    mutationFn: async (listId: string) => {
+      await api.delete(`/lists/${listId}`);
+      await localStore.markListsSynced([listId]);
     },
-    onError: () => Alert.alert('Error', 'Could not delete list.'),
-  });
-
-  const renameMutation = useMutation({
-    mutationFn: ({ listId, name }: { listId: string; name: string }) =>
-      api.put<GroceryList>(`/lists/${listId}`, { name }),
-    onSuccess: (updated) => {
-      qc.setQueryData<GroceryList[]>(['lists'], (prev = []) =>
-        prev.map((l) => (l.listId === updated.listId ? updated : l)),
-      );
-    },
-    onError: () => Alert.alert('Error', 'Could not rename list.'),
+    // No onError: soft-deleted SQLite entry (synced=0) will sync on reconnect
   });
 
   function handleDelete(listId: string, name: string) {
     Alert.alert('Delete List', `Delete "${name}"?`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => deleteMutation.mutate(listId) },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          // Optimistic: remove from cache immediately
+          qc.setQueryData<GroceryList[]>(['lists'], (prev = []) =>
+            prev.filter((l) => l.listId !== listId),
+          );
+          // Soft-delete in SQLite (unsynced)
+          await localStore.softDeleteList(listId);
+          // Background API call
+          deleteMutation.mutate(listId);
+        },
+      },
     ]);
   }
 
-  function handleCreate() {
-    const name = newName.trim();
-    if (!name) return;
-    createMutation.mutate(name);
+  // ── Rename list (offline-first) ───────────────────────────────────────────
+  const renameMutation = useMutation({
+    mutationFn: async ({ listId, name }: { listId: string; name: string }) => {
+      // Update SQLite (unsynced)
+      await localStore.updateList(listId, { name }, 0);
+      // Try API
+      const updated = await api.put<GroceryList>(`/lists/${listId}`, { name });
+      await localStore.markListsSynced([listId]);
+      return updated;
+    },
+    onSuccess: (updated) => {
+      qc.setQueryData<GroceryList[]>(['lists'], (prev = []) =>
+        prev.map((l) => (l.listId === updated.listId ? updated : l)),
+      );
+    },
+    onError: (_, { listId, name }) => {
+      // SQLite was updated but API failed — stays unsynced (sync handles it)
+      // Keep the local name in cache
+      qc.setQueryData<GroceryList[]>(['lists'], (prev = []) =>
+        prev.map((l) => (l.listId === listId ? { ...l, name } : l)),
+      );
+    },
+  });
+
+  function handleRename(listId: string, name: string) {
+    // Optimistic cache update immediately
+    qc.setQueryData<GroceryList[]>(['lists'], (prev = []) =>
+      prev.map((l) => (l.listId === listId ? { ...l, name } : l)),
+    );
+    renameMutation.mutate({ listId, name });
   }
 
   async function handleSignOut() {
@@ -116,10 +204,17 @@ export default function ListsScreen() {
               list={item}
               onPress={() => router.push(`/(app)/list/${item.listId}`)}
               onDelete={() => handleDelete(item.listId, item.name)}
-              onRename={(name) => renameMutation.mutate({ listId: item.listId, name })}
+              onRename={(name) => handleRename(item.listId, name)}
             />
           )}
           contentContainerStyle={{ paddingVertical: spacing[2] }}
+          refreshControl={
+            <RefreshControl
+              refreshing={isFetching && !isLoading}
+              onRefresh={refetch}
+              tintColor={colors.primary}
+            />
+          }
         />
       )}
 

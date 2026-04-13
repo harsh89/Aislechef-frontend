@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback, useMemo } from 'react';
+import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
   FlatList,
@@ -7,6 +7,7 @@ import {
   TextInput,
   ActivityIndicator,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import { useLocalSearchParams, useRouter, Stack, useFocusEffect } from 'expo-router';
 import {
@@ -18,6 +19,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomSheet from '@gorhom/bottom-sheet';
 import { api } from '../../../lib/api';
+import { localStore } from '../../../lib/localStore';
 import { useTheme } from '../../../hooks/useTheme';
 import { Text } from '../../../components/ui/Text';
 import { ItemRow } from '../../../components/features/items/ItemRow';
@@ -42,6 +44,32 @@ export default function ListDetailScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
+
+  // ── Seed cache from SQLite on first mount (instant display) ──────────────
+  useEffect(() => {
+    if (qc.getQueryData(['items', listId])) return;
+    localStore.getItems(listId).then((localItems) => {
+      if (!localItems.length) return;
+      const now = new Date().toISOString();
+      qc.setQueryData(['items', listId], {
+        pages: [
+          {
+            listId,
+            name: '',
+            lastUpdated: now,
+            items: localItems,
+            pagination: {
+              page: 1,
+              limit: localItems.length,
+              total: localItems.length,
+              totalPages: 1,
+            },
+          },
+        ],
+        pageParams: [1],
+      });
+    });
+  }, [listId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useFocusEffect(
     useCallback(() => {
@@ -68,10 +96,17 @@ export default function ListDetailScreen() {
     isFetching,
     isLoading,
     isError,
+    refetch,
   } = useInfiniteQuery({
     queryKey: ['items', listId],
-    queryFn: ({ pageParam = 1 }) =>
-      api.get<ListDetailResponse>(`/lists/${listId}?page=${pageParam}&limit=${LIMIT}`),
+    queryFn: async ({ pageParam = 1 }) => {
+      const response = await api.get<ListDetailResponse>(
+        `/lists/${listId}?page=${pageParam}&limit=${LIMIT}`,
+      );
+      // Update SQLite with server items (background)
+      Promise.all(response.items.map((item) => localStore.upsertItem(item, 1))).catch(() => {});
+      return response;
+    },
     getNextPageParam: (last) =>
       last.pagination.page < last.pagination.totalPages
         ? last.pagination.page + 1
@@ -79,6 +114,41 @@ export default function ListDetailScreen() {
     initialPageParam: 1,
     enabled: !searchQuery,
   });
+
+  // ── Merge back any local-only unsynced items after server fetch ───────────
+  useEffect(() => {
+    if (!infiniteData) return;
+    localStore.getUnsyncedItems().then((unsynced) => {
+      const serverIds = new Set(
+        infiniteData.pages.flatMap((p) => p.items.map((i) => i.itemId)),
+      );
+      const localNew = unsynced.filter(
+        (i) => i.listId === listId && !i.isDeleted && !serverIds.has(i.itemId),
+      );
+      if (!localNew.length) return;
+
+      const mapped: GroceryItem[] = localNew.map((i) => ({
+        itemId: i.itemId,
+        listId: i.listId,
+        itemName: i.itemName,
+        quantity: i.quantity,
+        unit: i.unit as Unit,
+        lastUpdated: i.lastUpdated,
+        isDeleted: Boolean(i.isDeleted),
+        isCompleted: Boolean(i.isCompleted),
+      }));
+
+      qc.setQueryData(['items', listId], (old: typeof infiniteData) => {
+        if (!old) return old;
+        return {
+          ...old,
+          pages: old.pages.map((page, idx) =>
+            idx === 0 ? { ...page, items: [...mapped, ...page.items] } : page,
+          ),
+        };
+      });
+    });
+  }, [infiniteData, listId, qc]);
 
   const items = useMemo(
     () => infiniteData?.pages.flatMap((p) => p.items) ?? [],
@@ -105,27 +175,85 @@ export default function ListDetailScreen() {
     [baseItems],
   );
 
-  // ── Add item ──────────────────────────────────────────────────────────────
+  // ── Add item (offline-first) ──────────────────────────────────────────────
   const addMutation = useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       itemName,
       quantity,
       unit,
+      tempId,
     }: {
       itemName: string;
       quantity: number;
       unit: Unit;
-    }) =>
-      api.post<GroceryItem>(`/lists/${listId}/items`, { itemName, quantity, unit }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['items', listId] });
+      tempId: string;
+    }) => {
+      const serverItem = await api.post<GroceryItem>(`/lists/${listId}/items`, {
+        itemName,
+        quantity,
+        unit,
+      });
+      await localStore.replaceItemId(tempId, serverItem);
+      return { tempId, serverItem };
     },
-    onError: () => Alert.alert('Error', 'Could not add item.'),
+    onSuccess: ({ tempId, serverItem }) => {
+      qc.setQueryData(['items', listId], (old: typeof infiniteData) => {
+        if (!old) return old;
+        return {
+          ...old,
+          pages: old.pages.map((page) => ({
+            ...page,
+            items: page.items.map((i) => (i.itemId === tempId ? serverItem : i)),
+          })),
+        };
+      });
+    },
+    // No onError: SQLite entry stays unsynced, sync handles it on reconnect
   });
 
-  // ── Update item ───────────────────────────────────────────────────────────
+  async function handleAddItem(itemName: string, quantity: number, unit: Unit) {
+    const tempId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const tempItem: GroceryItem = {
+      itemId: tempId,
+      listId,
+      itemName,
+      quantity,
+      unit,
+      lastUpdated: now,
+      createdAt: now,
+      isDeleted: false,
+      isCompleted: false,
+    };
+
+    // 1. Write to SQLite immediately (unsynced)
+    await localStore.upsertItem(tempItem, 0);
+
+    // 2. Optimistic cache update
+    qc.setQueryData(['items', listId], (old: typeof infiniteData) => {
+      const newPage = {
+        listId,
+        name: listMeta?.name ?? '',
+        lastUpdated: now,
+        items: [tempItem],
+        pagination: { page: 1, limit: 1, total: 1, totalPages: 1 },
+      };
+      if (!old) return { pages: [newPage], pageParams: [1] };
+      return {
+        ...old,
+        pages: old.pages.map((page, idx) =>
+          idx === 0 ? { ...page, items: [tempItem, ...page.items] } : page,
+        ),
+      };
+    });
+
+    // 3. Background API call (fire-and-forget — sheet closes immediately)
+    addMutation.mutate({ itemName, quantity, unit, tempId });
+  }
+
+  // ── Update item (offline-first) ───────────────────────────────────────────
   const updateMutation = useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       itemId,
       itemName,
       quantity,
@@ -135,12 +263,27 @@ export default function ListDetailScreen() {
       itemName: string;
       quantity: number;
       unit: Unit;
-    }) =>
-      api.put<GroceryItem>(`/lists/${listId}/items/${itemId}`, {
-        itemName,
-        quantity,
-        unit,
-      }),
+    }) => {
+      const patch = { itemName, quantity, unit };
+      await localStore.updateItem(itemId, patch, 0);
+      const updated = await api.put<GroceryItem>(`/lists/${listId}/items/${itemId}`, patch);
+      await localStore.markItemsSynced([itemId]);
+      return updated;
+    },
+    onMutate: async ({ itemId, itemName, quantity, unit }) => {
+      qc.setQueryData(['items', listId], (old: typeof infiniteData) => {
+        if (!old) return old;
+        return {
+          ...old,
+          pages: old.pages.map((page) => ({
+            ...page,
+            items: page.items.map((i) =>
+              i.itemId === itemId ? { ...i, itemName, quantity, unit } : i,
+            ),
+          })),
+        };
+      });
+    },
     onSuccess: (updated) => {
       qc.setQueryData(['items', listId], (old: typeof infiniteData) => {
         if (!old) return old;
@@ -156,11 +299,12 @@ export default function ListDetailScreen() {
     onError: () => Alert.alert('Error', 'Could not update item.'),
   });
 
-  // ── Delete item ───────────────────────────────────────────────────────────
+  // ── Delete item (offline-first) ───────────────────────────────────────────
   const deleteMutation = useMutation({
-    mutationFn: (itemId: string) =>
-      api.delete(`/lists/${listId}/items/${itemId}`),
-    onSuccess: (_, itemId) => {
+    mutationFn: async (itemId: string) => {
+      // Soft-delete in SQLite (unsynced)
+      await localStore.softDeleteItem(itemId);
+      // Remove from cache immediately
       qc.setQueryData(['items', listId], (old: typeof infiniteData) => {
         if (!old) return old;
         return {
@@ -171,42 +315,109 @@ export default function ListDetailScreen() {
           })),
         };
       });
+      // Background API call
+      await api.delete(`/lists/${listId}/items/${itemId}`);
+      await localStore.markItemsSynced([itemId]);
     },
-    onError: () => Alert.alert('Error', 'Could not delete item.'),
+    // No onError: soft-delete stays in SQLite, sync handles it
   });
 
-  // ── Toggle item complete ───────────────────────────────────────────────────
+  // ── Toggle item complete (debounced optimistic, offline-first) ────────────
   const completeMutation = useMutation({
-    mutationFn: ({ itemId, isCompleted }: { itemId: string; isCompleted: boolean }) =>
-      api.put<GroceryItem>(`/lists/${listId}/items/${itemId}`, { isCompleted }),
-    onSuccess: (updated) => {
+    mutationFn: async ({ itemId, isCompleted }: { itemId: string; isCompleted: boolean }) => {
+      const updated = await api.put<GroceryItem>(`/lists/${listId}/items/${itemId}`, {
+        isCompleted,
+      });
+      await localStore.markItemsSynced([itemId]);
+      return updated;
+    },
+  });
+
+  const debounceTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  useEffect(() => {
+    const timers = debounceTimers.current;
+    return () => timers.forEach(clearTimeout);
+  }, []);
+
+  function handleToggleComplete(item: GroceryItem) {
+    const newIsCompleted = !item.isCompleted;
+
+    // 1. Optimistic cache update immediately
+    qc.setQueryData(['items', listId], (old: typeof infiniteData) => {
+      if (!old) return old;
+      return {
+        ...old,
+        pages: old.pages.map((page) => ({
+          ...page,
+          items: page.items.map((i) =>
+            i.itemId === item.itemId ? { ...i, isCompleted: newIsCompleted } : i,
+          ),
+        })),
+      };
+    });
+
+    // 2. Write to SQLite immediately (unsynced)
+    localStore.updateItem(item.itemId, { isCompleted: newIsCompleted }, 0).catch(() => {});
+
+    // 3. Debounce the API call
+    const existing = debounceTimers.current.get(item.itemId);
+    if (existing) clearTimeout(existing);
+
+    const timer = setTimeout(async () => {
+      debounceTimers.current.delete(item.itemId);
+      try {
+        await completeMutation.mutateAsync({ itemId: item.itemId, isCompleted: newIsCompleted });
+      } catch {
+        // Network error: SQLite has the update (unsynced), sync handles it on reconnect
+      }
+    }, 600);
+
+    debounceTimers.current.set(item.itemId, timer);
+  }
+
+  // ── Reset completed items (offline-first) ─────────────────────────────────
+  const resetMutation = useMutation({
+    mutationFn: async () => {
+      // Get completed item IDs from cache
+      const currentData = qc.getQueryData<typeof infiniteData>(['items', listId]);
+      const completedIds =
+        currentData?.pages.flatMap((p) =>
+          p.items.filter((i) => i.isCompleted).map((i) => i.itemId),
+        ) ?? [];
+
+      // Update SQLite for each (unsynced)
+      await Promise.all(
+        completedIds.map((id) => localStore.updateItem(id, { isCompleted: false }, 0)),
+      );
+
+      // Optimistic cache update
       qc.setQueryData(['items', listId], (old: typeof infiniteData) => {
         if (!old) return old;
         return {
           ...old,
           pages: old.pages.map((page) => ({
             ...page,
-            items: page.items.map((i) => (i.itemId === updated.itemId ? updated : i)),
+            items: page.items.map((i) => ({ ...i, isCompleted: false })),
           })),
         };
       });
-    },
-    onError: () => Alert.alert('Error', 'Could not update item.'),
-  });
 
-  // ── Reset completed items ─────────────────────────────────────────────────
-  const resetMutation = useMutation({
-    mutationFn: () => api.post(`/lists/${listId}/items/reset-completed`, {}),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['items', listId] });
+      // Background API call
+      await api.post(`/lists/${listId}/items/reset-completed`, {});
+      await localStore.markItemsSynced(completedIds);
     },
     onError: () => Alert.alert('Error', 'Could not reset items.'),
   });
 
-  // ── Rename list ───────────────────────────────────────────────────────────
+  // ── Rename list (offline-first) ───────────────────────────────────────────
   const renameMutation = useMutation({
-    mutationFn: (name: string) =>
-      api.put<GroceryList>(`/lists/${listId}`, { name }),
+    mutationFn: async (name: string) => {
+      await localStore.updateList(listId, { name }, 0);
+      const updated = await api.put<GroceryList>(`/lists/${listId}`, { name });
+      await localStore.markListsSynced([listId]);
+      return updated;
+    },
     onSuccess: (updated) => {
       qc.setQueryData(['list-meta', listId], updated);
       qc.setQueryData<GroceryList[]>(['lists'], (prev = []) =>
@@ -215,15 +426,10 @@ export default function ListDetailScreen() {
     },
   });
 
-  // ── Handlers ──────────────────────────────────────────────────────────────
   function commitTitleRename() {
     const trimmed = titleDraft.trim();
     if (trimmed && trimmed !== listMeta?.name) renameMutation.mutate(trimmed);
     setEditingTitle(false);
-  }
-
-  async function handleAddItem(itemName: string, quantity: number, unit: Unit) {
-    await addMutation.mutateAsync({ itemName, quantity, unit });
   }
 
   const handleEndReached = useCallback(() => {
@@ -364,9 +570,7 @@ export default function ListDetailScreen() {
               item={item}
               isCompleted={!!item.isCompleted}
               isDeleting={deleteMutation.isPending && deleteMutation.variables === item.itemId}
-              onToggleComplete={() =>
-                completeMutation.mutate({ itemId: item.itemId, isCompleted: !item.isCompleted })
-              }
+              onToggleComplete={() => handleToggleComplete(item)}
               onUpdate={async (patch) => {
                 await updateMutation.mutateAsync({ itemId: item.itemId, ...patch });
               }}
@@ -379,6 +583,13 @@ export default function ListDetailScreen() {
           ListEmptyComponent={ListEmpty}
           keyboardShouldPersistTaps="handled"
           style={styles.flex}
+          refreshControl={
+            <RefreshControl
+              refreshing={isFetching && !isLoading && !isFetchingNextPage}
+              onRefresh={refetch}
+              tintColor={colors.primary}
+            />
+          }
         />
       )}
 

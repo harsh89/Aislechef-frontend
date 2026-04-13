@@ -105,6 +105,7 @@ export interface SyncItem {
   unit: string;
   lastUpdated: string;
   isDeleted: boolean;
+  isCompleted: boolean;
 }
 
 export interface SyncResponse {

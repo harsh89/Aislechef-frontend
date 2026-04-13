@@ -31,6 +31,7 @@ async function runMigrations(database: SQLite.SQLiteDatabase): Promise<void> {
       lastUpdated TEXT NOT NULL,
       createdAt   TEXT NOT NULL,
       isDeleted   INTEGER NOT NULL DEFAULT 0,
+      isCompleted INTEGER NOT NULL DEFAULT 0,
       synced      INTEGER NOT NULL DEFAULT 0
     );
 
@@ -38,4 +39,5 @@ async function runMigrations(database: SQLite.SQLiteDatabase): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_lists_createdAt ON lists (createdAt DESC);
     CREATE INDEX IF NOT EXISTS idx_items_createdAt ON items (createdAt DESC);
   `);
+
 }

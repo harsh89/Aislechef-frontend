@@ -9,6 +9,8 @@ import { useAuthStore } from '../stores/auth.store';
 import { useSync } from '../hooks/useSync';
 import { useTheme } from '../hooks/useTheme';
 import { getDatabase } from '../lib/database';
+import { ErrorBoundary } from '../components/ErrorBoundary';
+import { OfflineBanner } from '../components/OfflineBanner';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -63,14 +65,17 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <QueryClientProvider client={queryClient}>
-          <BottomSheetModalProvider>
-            <SyncProvider />
-            <AuthGuard>
-              <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }} />
-            </AuthGuard>
-          </BottomSheetModalProvider>
-        </QueryClientProvider>
+        <ErrorBoundary>
+          <QueryClientProvider client={queryClient}>
+            <BottomSheetModalProvider>
+              <OfflineBanner />
+              <SyncProvider />
+              <AuthGuard>
+                <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.background } }} />
+              </AuthGuard>
+            </BottomSheetModalProvider>
+          </QueryClientProvider>
+        </ErrorBoundary>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
