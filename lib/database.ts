@@ -40,4 +40,8 @@ async function runMigrations(database: SQLite.SQLiteDatabase): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_items_createdAt ON items (createdAt DESC);
   `);
 
+  // Add isCompleted to existing databases that predate this column
+  await database
+    .execAsync('ALTER TABLE items ADD COLUMN isCompleted INTEGER NOT NULL DEFAULT 0;')
+    .catch(() => {}); // no-op if column already exists
 }

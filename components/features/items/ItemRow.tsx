@@ -158,24 +158,6 @@ export function ItemRow({ item, isCompleted, isDeleting, onToggleComplete, onUpd
                 <Text variant="small">{draftUnit}</Text>
               </Pressable>
             </View>
-            {/* Actions */}
-            <View style={styles.editActions}>
-              <Pressable
-                onPress={cancelEdit}
-                style={[styles.editActionBtn, { backgroundColor: colors.border }]}
-              >
-                <Text style={styles.editActionIcon} color={colors.text}>✕</Text>
-              </Pressable>
-              <Pressable
-                onPress={commitEdit}
-                disabled={saving}
-                style={[styles.editActionBtn, { backgroundColor: colors.primary, opacity: saving ? 0.6 : 1 }]}
-              >
-                <Text style={styles.editActionIcon} color={colors.primaryForeground}>
-                  {saving ? '…' : '✓'}
-                </Text>
-              </Pressable>
-            </View>
           </View>
         ) : (
           <View style={styles.displayContent}>
@@ -193,19 +175,30 @@ export function ItemRow({ item, isCompleted, isDeleting, onToggleComplete, onUpd
         )}
       </View>
 
-      {/* Edit + Delete */}
-      {!editing && (
-        <View style={styles.rowActions}>
-          <Pressable onPress={startEdit} hitSlop={8} style={styles.actionBtn}>
-            <Text style={styles.actionIcon} color={colors.textMuted}>✎</Text>
-          </Pressable>
-          <Pressable onPress={handleDelete} hitSlop={8} style={styles.actionBtn} disabled={isDeleting}>
-            {isDeleting
-              ? <ActivityIndicator size="small" color={colors.destructive} />
-              : <Text style={styles.actionIcon} color={colors.destructive}>✕</Text>}
-          </Pressable>
-        </View>
-      )}
+      {/* Right-side actions: edit/delete normally, cancel/save while editing */}
+      <View style={styles.rowActions}>
+        {editing ? (
+          <>
+            <Pressable onPress={cancelEdit} hitSlop={8} style={[styles.editActionBtn, { backgroundColor: colors.border }]}>
+              <Text style={styles.editActionIcon} color={colors.text}>✕</Text>
+            </Pressable>
+            <Pressable onPress={commitEdit} disabled={saving} hitSlop={8} style={[styles.editActionBtn, { backgroundColor: colors.primary, opacity: saving ? 0.6 : 1 }]}>
+              <Text style={styles.editActionIcon} color={colors.primaryForeground}>{saving ? '…' : '✓'}</Text>
+            </Pressable>
+          </>
+        ) : (
+          <>
+            <Pressable onPress={startEdit} hitSlop={8} style={styles.actionBtn}>
+              <Text style={styles.actionIcon} color={colors.textMuted}>✎</Text>
+            </Pressable>
+            <Pressable onPress={handleDelete} hitSlop={8} style={styles.actionBtn} disabled={isDeleting}>
+              {isDeleting
+                ? <ActivityIndicator size="small" color={colors.destructive} />
+                : <Text style={styles.actionIcon} color={colors.destructive}>✕</Text>}
+            </Pressable>
+          </>
+        )}
+      </View>
 
       {/* Unit picker modal */}
       <Modal
@@ -263,19 +256,18 @@ const styles = StyleSheet.create({
   checkmark: { fontWeight: '700' },
   content: { flex: 1 },
   displayContent: { gap: 2 },
-  editContainer: { gap: 6 },
+  editContainer: { gap: 4 },
   editInput: {
     borderBottomWidth: 1,
     paddingVertical: 2,
-    marginBottom: 4,
+    marginBottom: 2,
   },
   editQtyRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   editQtyInput: {},
   unitBtn: {},
-  editActions: { flexDirection: 'row', gap: 10, justifyContent: 'flex-end', marginTop: 6 },
-  editActionBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  editActionIcon: { fontSize: 20, lineHeight: 24, fontWeight: '600' },
-  rowActions: { flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 8 },
+  editActionBtn: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  editActionIcon: { fontSize: 14, lineHeight: 18, fontWeight: '700' },
+  rowActions: { flexDirection: 'row', alignItems: 'center', gap: 10, marginLeft: 8, alignSelf: 'center' },
   actionBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   actionIcon: { fontSize: 20, lineHeight: 24 },
   pickerOverlay: { flex: 1, justifyContent: 'flex-end' },

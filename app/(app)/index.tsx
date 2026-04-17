@@ -13,6 +13,7 @@ import {
 import { useRouter, useFocusEffect, Stack } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as Crypto from 'expo-crypto';
 import { api } from '../../lib/api';
 import { localStore } from '../../lib/localStore';
 import { supabase } from '../../lib/supabase';
@@ -92,7 +93,7 @@ export default function ListsScreen() {
     const name = newName.trim();
     if (!name) return;
 
-    const tempId = crypto.randomUUID();
+    const tempId = Crypto.randomUUID();
     const now = new Date().toISOString();
     const tempList: GroceryList = { listId: tempId, name, lastUpdated: now };
 
@@ -174,13 +175,47 @@ export default function ListsScreen() {
     await supabase.auth.signOut();
   }
 
+  function handleAccountMenu() {
+    Alert.alert('Account', undefined, [
+      {
+        text: 'Sign out',
+        onPress: handleSignOut,
+      },
+      {
+        text: 'Delete account',
+        style: 'destructive',
+        onPress: () =>
+          Alert.alert(
+            'Delete account',
+            'Your account will be permanently deleted after a 30-day grace period. This cannot be undone.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Delete',
+                style: 'destructive',
+                onPress: async () => {
+                  try {
+                    await api.delete('/auth/account');
+                    await supabase.auth.signOut();
+                  } catch {
+                    Alert.alert('Error', 'Could not delete account. Please try again.');
+                  }
+                },
+              },
+            ],
+          ),
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }
+
   return (
     <SafeAreaView style={[styles.flex, { backgroundColor: colors.background }]} edges={['top']}>
       <Stack.Screen options={{ title: 'My Lists' }} />
       {/* Header */}
       <View style={[styles.header, { paddingHorizontal: spacing[4], borderBottomColor: colors.border }]}>
         <Text variant="h2">My Lists</Text>
-        <Button variant="ghost" size="sm" label="Sign out" onPress={handleSignOut} />
+        <Button variant="ghost" size="sm" label="Account" onPress={handleAccountMenu} />
       </View>
 
       {isLoading ? (

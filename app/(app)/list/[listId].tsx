@@ -18,6 +18,7 @@ import {
 } from '@tanstack/react-query';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import BottomSheet from '@gorhom/bottom-sheet';
+import * as Crypto from 'expo-crypto';
 import { api } from '../../../lib/api';
 import { localStore } from '../../../lib/localStore';
 import { useTheme } from '../../../hooks/useTheme';
@@ -212,7 +213,7 @@ export default function ListDetailScreen() {
   });
 
   async function handleAddItem(itemName: string, quantity: number, unit: Unit) {
-    const tempId = crypto.randomUUID();
+    const tempId = Crypto.randomUUID();
     const now = new Date().toISOString();
     const tempItem: GroceryItem = {
       itemId: tempId,
